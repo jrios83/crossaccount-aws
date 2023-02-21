@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: The AWS Cloudformation template for creating cross account role to be assumed by TOOLS account to carry out deploy
+
+Parameters:
+  ToolsAccountID:
+    Description: Account ID of the TOOLS AWS Account that initiates code deployments to this account.
+    Type: String
+    ConstraintDescription: Must be a valid AWS Account ID without hyphens.
+    AllowedPattern: '\d{12}'
+    #MinLength: 12
+    #MaxLenght: 12
+  KeyArn:
+    Description: Provide the KMS key ARN if you've deployed the pipeline stack
+    Type: String
+    ConstraintDescription: Must be a valid AWS ARN for a KMS Key in the TOOLS account
+    Default: ''
+
+# If the Key Arn is blank, it's our initial deployment,
+# so don't deploy de policy which references the bucket and key
+Conditions:
+  DeployPolicy: !Not [!Equals [!Ref KeyArn, '']]
+
+Resources:
+  CrossAccountDeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CodePipelineCrossAccountRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${ToolsAccountID}:root
+            Action:
+              - sts:AssumeRole
+  
+  CrossAccountDeploymentPolicy:
+    Condition: DeployPolicy
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows pipeline in master account to deploy API Gateway, Lambda
+      ManagedPolicyName: CodePipelineCrossAccountPolicy
+      Roles: !Ref CrossAccountDeploymentRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - cloudformation:*
+              - iam:PassRole
+              - eks:*
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - s3:Get*
+              - s3:Put*
+              - s3:ListBucket
+            Resource:
+              - !Sub arn:aws:s3:::artifact-bucket-${ToolsAccountID}
+              - !Sub arn:aws:s3:::artifact-bucket-${ToolsAccountID}/*
+            Effect: Allow
+          - Action:
+              - kms:DescribeKey
+              - kms:GenerateDataKey*
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:Decrypt
+            Resource:
+              - !Sub ${KeyArn}
+            Effect: Allow
